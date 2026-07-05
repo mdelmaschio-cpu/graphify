@@ -47,6 +47,22 @@ Every extractor returns:
 
 `validate.py` enforces this schema before `build_graph()` consumes it.
 
+## Extension modules
+
+Beyond the core pipeline, `graphify/` has grown supporting modules, grouped by concern:
+
+- **Ingestion / introspection**: `manifest_ingest.py`, `scip_ingest.py`, `mcp_ingest.py`,
+  `cargo_introspect.py`, `pg_introspect.py`, `google_workspace.py`, `file_slice.py`.
+- **Graph resolution / maintenance**: `resolver_registry.py`, `symbol_resolution.py`,
+  `ruby_resolution.py`, `dedup.py`, `semantic_cleanup.py`, `multigraph_compat.py`, `diagnostics.py`,
+  `ids.py`, `paths.py`, `manifest.py` (back-compat shim over `detect.py`), `_minhash.py`.
+- **Query / analysis tooling**: `affected.py`, `querylog.py`, `reflect.py`, `global_graph.py`,
+  `prs.py`, `wiki.py`, `tree_html.py`.
+- **LLM / media**: `llm.py`, `transcribe.py`.
+- **Editor/agent integration**: `hooks.py`.
+
+See `CLAUDE.md`'s "Extension modules" section for a one-line description of each.
+
 ## Confidence labels
 
 | Label | Meaning |
