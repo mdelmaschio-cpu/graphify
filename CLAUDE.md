@@ -97,7 +97,47 @@ languages — C#, Razor/Blade templates, Elixir, Zig — plus inline tree-sitter
 the 36+ supported languages). `__main__.py` is the CLI entry point: it is a plain `sys.argv`-based
 dispatcher (`if cmd == "install": ... elif cmd == "uninstall": ...`), not argparse — new subcommands
 are added as another `elif cmd == "..."` branch, with usage text hand-maintained in the `--help`
-block near the top of `main()`.
+block near the top of `main()`. Besides the pipeline stages above, `__main__.py` also dispatches
+platform-install subcommands (`install`/`uninstall`/`claude`/`codex`/`cursor`/`copilot`/`amp`/`kilo`/
+`kiro`/`pi`/`devin`/`vscode`/`antigravity`/`codebuddy`/`gemini`/`falkordb`/... — one per supported
+assistant/backend) and the graph-tooling subcommands backed by the extension modules below
+(`affected`, `prs`, `reflect`, `diagnose`, `global`, `wiki`, `tree`, `html`/`callflow-html`, `svg`,
+`graphml`, `merge-*`, `label`, `query`, `cache-check`, `hook`/`hook-check`).
+
+### Extension modules
+
+Beyond the core pipeline, `graphify/` has grown a number of supporting modules, grouped by concern:
+
+**Ingestion / introspection** (feed non-code sources into extraction):
+`manifest_ingest.py` (deterministic, non-LLM parsing of package manifests — `package.json`,
+`requirements.txt`, etc.), `scip_ingest.py` (SCIP JSON ingestion), `mcp_ingest.py` (MCP server config
+files), `cargo_introspect.py` (Cargo workspace-internal crate deps), `pg_introspect.py` (Postgres
+schema introspection), `google_workspace.py` (Google Docs/Sheets shortcut files), `file_slice.py`
+(intra-file slicing for oversized text documents so they don't blow the LLM context window).
+
+**Graph resolution / maintenance**: `resolver_registry.py` (registry of per-language cross-file
+resolution passes, invoked from `build.py`), `symbol_resolution.py` (generic deterministic symbol
+indexing shared by resolvers), `ruby_resolution.py` (Ruby-specific member-call resolver registered
+through `resolver_registry.py`), `dedup.py` (entity deduplication pipeline), `semantic_cleanup.py`
+(validates/sanitizes LLM-produced semantic fragments before merge), `multigraph_compat.py` (runtime
+capability probe for MultiDiGraph mode), `diagnostics.py` (read-only diagnostics for MultiDiGraph
+readiness), `ids.py` (single source of truth for node-ID normalization), `paths.py` (single source of
+truth for the `graphify-out/` directory name and path resolution), `manifest.py` (back-compat
+re-export shim over `detect.py`'s manifest helpers), `_minhash.py` (MinHash + band-LSH, a
+datasketch-compatible drop-in used by `dedup.py`).
+
+**Query / analysis tooling**: `affected.py` (blast-radius query — given a changed symbol, finds
+affected nodes; backs `graphify affected`), `querylog.py` (append-only, fail-silent JSONL query
+logging), `reflect.py` (deterministic "work memory" reflection over `graphify-out/memory/`),
+`global_graph.py` (registry for the cross-project "global" graph — `graphify global add/remove/list`),
+`prs.py` (graph-aware PR dashboard), `wiki.py` (Markdown wiki export), `tree_html.py` (D3 v7
+collapsible-tree HTML view).
+
+**LLM / media**: `llm.py` (backend detection, cost estimation, parallel corpus extraction, community
+labeling), `transcribe.py` (audio/video transcription via Whisper for `ingest.py`).
+
+**Editor/agent integration**: `hooks.py` (install/uninstall/status for the SessionStart hook that
+keeps the graph fresh during a coding session).
 
 ### Extraction output schema
 
@@ -140,9 +180,13 @@ Every extractor returns:
 All external input passes through `graphify/security.py` before use:
 
 - URLs → `validate_url()` (http/https only) + `_NoFileRedirectHandler` (blocks `file://` redirects)
+  + `_SSRFGuardedHTTPConnection`/`_SSRFGuardedHTTPSConnection` (resolve-then-check the IP against a
+  private/link-local/loopback blocklist before connecting, closing DNS-rebinding SSRF gaps)
 - Fetched content → `safe_fetch()` / `safe_fetch_text()` (size cap, timeout)
-- Graph file paths → `validate_graph_path()` (must resolve inside `graphify-out/`)
-- Node labels → `sanitize_label()` (strips control chars, caps 256 chars, HTML-escapes)
+- Graph file paths → `validate_graph_path()` (must resolve inside `graphify-out/`) and
+  `check_graph_file_size_cap()` (rejects oversized graph files before parsing)
+- Node labels → `sanitize_label()` (strips control chars, caps 256 chars, HTML-escapes); arbitrary
+  metadata values → `sanitize_metadata()`
 
 See `SECURITY.md` for the full threat model.
 
@@ -170,12 +214,20 @@ the fragments under `tools/skillgen/fragments/` (`core`, `dispatch`, `extra`, `q
 - `graphify/` — the library + CLI (`graphify.__main__:main`) + MCP server entry (`graphify.serve:_main`).
 - `graphify/extractors/` — per-language extractor modules for languages that don't fit the generic
   tree-sitter path in `extract.py` (C#, Razor, Blade, Elixir, Zig).
+- `graphify/skills/<platform>/` — per-assistant generated skill references (`claude`, `codex`,
+  `cursor` (as `agents`), `amp`, `kilo`, `kiro`, `pi`, `copilot`, `droid`, `claw`, `opencode`, `trae`,
+  `vscode`, `windows`); `graphify/skill*.md` / `graphify/command-*.md` are the flat, non-directory
+  skill artifacts for the remaining platforms. All are generated — see "Skill generation" above.
+- `graphify/always_on/` — generated always-on injection blocks (`claude-md.md`, `agents-md.md`,
+  `gemini-md.md`, `antigravity-rules.md`, `kiro-steering.md`, `vscode-instructions.md`) inserted into
+  a host project's own config files by `graphify install`.
 - `tools/skillgen/` — build-time generator for the skill/CLAUDE.md/AGENTS.md artifacts (see above).
 - `tests/` — one test file per module (`test_<module>.py`), plus `tests/fixtures/` (per-language
   sample repos/files used by extractor tests).
 - `worked/` — worked examples (real corpora run through graphify, with a `review.md` critiquing what
   the graph got right/wrong). This is the main contribution vector besides bug fixes.
-- `docs/` — architecture notes, RFCs, and translated READMEs (`docs/translations/`).
+- `docs/` — architecture notes (`how-it-works.md`, `node-summaries-rfc.md`), `docs/superpowers/`
+  (Claude "superpower" plugin notes), and translated READMEs (`docs/translations/`).
 - `ARCHITECTURE.md` — canonical architecture doc (kept in sync with this section).
 - `BENCHMARKS.md` — retrieval-quality benchmark methodology and results (LOCOMO, LongMemEval-S, etc).
 
@@ -183,9 +235,10 @@ the fragments under `tools/skillgen/fragments/` (`core`, `dispatch`, `extra`, `q
 
 - Optional dependency extras (`pyproject.toml` `[project.optional-dependencies]`) gate heavy/native
   deps behind opt-in installs: `mcp`, `neo4j`, `falkordb`, `pdf`, `watch`, `svg`, `leiden`, `office`,
-  `google`, `postgres`, `video`, and per-LLM-backend extras (`kimi`, `ollama`, `bedrock`, `anthropic`,
-  `gemini`, `openai`). `all` pulls in everything except the niche/native-toolchain ones (`dm`,
-  `terraform` stay separate since they require a C toolchain or ship non-portable wheels).
+  `google`, `postgres`, `video`, `chinese` (jieba word segmentation), `sql` (tree-sitter-sql), and
+  per-LLM-backend extras (`kimi`, `ollama`, `bedrock`, `anthropic`, `gemini`, `openai`). `all` pulls in
+  everything except the niche/native-toolchain ones (`dm`, `terraform` stay separate since they
+  require a C toolchain or ship non-portable wheels).
 - `ruff` lint selection is intentionally narrow (`E9, F63, F7, F82` — syntax/undefined-name errors
   only); don't assume a broader ruleset is enforced.
 - `uv.lock` is committed; CI runs with `--frozen` and must never cause the lock to churn.
